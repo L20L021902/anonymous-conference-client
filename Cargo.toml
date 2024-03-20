@@ -6,7 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+argon2 = "0.5.3"
+async-native-tls = "0.5.0"
+env_logger = "0.11.3"
 futures = "0.3.30"
+log = "0.4.21"
+openssl = "0.10.64"
 
 [dependencies.async-std]
 version = "1.12"
