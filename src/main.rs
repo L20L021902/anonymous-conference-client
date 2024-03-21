@@ -3,6 +3,7 @@ use constants::Result;
 use protocol::enter_main_loop;
 
 mod constants;
+mod crypto;
 mod protocol;
 mod connection_manager;
 mod conference_manager;
