@@ -1,7 +1,7 @@
 use openssl::symm::{encrypt_aead, Cipher, decrypt_aead};
 
 const CIPHER: fn() -> Cipher = Cipher::chacha20_poly1305;
-const KEY_SIZE: usize = 32; // chacha20 uses a 32-byte key
+pub const KEY_SIZE: usize = 32; // chacha20 uses a 32-byte key
 const IV_SIZE: usize = 12; // chacha20 uses a 12-byte nonce
 const TAG_SIZE: usize = 16; // chacha20-poly1305 uses a 16-byte tag
 
@@ -10,6 +10,26 @@ pub struct EncryptionResult {
     pub ciphertext: Vec<u8>,
     pub iv: Vec<u8>,
     pub tag: Vec<u8>,
+}
+
+impl EncryptionResult {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut result = Vec::new();
+        result.extend_from_slice(&self.iv);
+        result.extend_from_slice(&self.tag);
+        result.extend_from_slice(&self.ciphertext);
+        result
+    }
+
+    pub fn decode(data: &[u8]) -> Result<EncryptionResult, ()> {
+        if data.len() < IV_SIZE + TAG_SIZE {
+            return Err(());
+        }
+        let iv = data[0..IV_SIZE].to_vec();
+        let tag = data[IV_SIZE..IV_SIZE + TAG_SIZE].to_vec();
+        let ciphertext = data[IV_SIZE + TAG_SIZE..].to_vec();
+        Ok(EncryptionResult{ ciphertext, iv, tag })
+    }
 }
 
 /// Encrypts a message using the chacha20-poly1305 AEAD cipher.
@@ -33,6 +53,18 @@ pub fn decrypt_message(ciphertext: &[u8], key: &[u8], iv: &[u8], tag: &[u8]) -> 
         Ok(plaintext) => Ok(plaintext),
         Err(_) => Err(()),
     }
+}
+
+pub fn generate_ephemeral_key() -> [u8; KEY_SIZE] {
+    let mut key: [u8; KEY_SIZE] = [0; KEY_SIZE];
+    openssl::rand::rand_bytes(&mut key).unwrap();
+    key
+}
+
+pub fn apply_ephemeral_key_part(key: &mut [u8; KEY_SIZE], part: &[u8]) {
+    assert_eq!(part.len(), KEY_SIZE);
+    // xor the key with the part
+    key.iter_mut().zip(part.iter()).for_each(|(a, b)| *a ^= *b);
 }
 
 #[cfg(test)]
