@@ -291,11 +291,15 @@ impl ConferenceManager {
         true
     }
 
+    /// Sign a message with the ring signature
+    /// returns the signature + message
     async fn sing_message(&mut self, message: Vec<u8>) -> Vec<u8> {
         todo!();
     }
 
-    async fn check_message_signature(&mut self, message: Vec<u8>) -> bool {
+    /// Check the signature of a message
+    /// returns the message and `true` if the signature is valid
+    async fn check_message_signature(&mut self, message: Vec<u8>) -> (Vec<u8>, bool) {
         todo!();
     }
 
@@ -332,6 +336,8 @@ impl ConferenceManager {
     }
 
     async fn process_text_message(&mut self, message: Vec<u8>) {
+        let (message, is_signature_valid) = self.check_message_signature(message).await;
+        // TODO notify the UI
         todo!();
     }
 }
