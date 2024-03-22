@@ -49,6 +49,10 @@ impl Hash for PublicKey {
 }
 
 #[repr(u8)]
+/// The different types of messages that can be sent between clients
+/// PublicKey = `0x01`
+/// EncryptionKeyPart = `0x02`
+/// Message = `0x03`
 enum ClientToClientMessage {
     PublicKey(Vec<u8>),
     EncryptionKeyPart(Vec<u8>),
@@ -181,7 +185,7 @@ impl ConferenceManager {
     }
 
     async fn process_message_public_key_exchange(&mut self, message: Vec<u8>) {
-        if let Ok(message) = self.read_message(message).await {
+        if let Some(message) = self.read_message(message).await {
             match message {
                 ClientToClientMessage::PublicKey(pubkey) => {
                     if let Ok(pubkey) = Rsa::public_key_from_der_pkcs1(&pubkey) {
@@ -211,7 +215,7 @@ impl ConferenceManager {
     }
 
     async fn process_message_ephemeral_key_negotiation(&mut self, message: Vec<u8>) {
-        if let Ok(message) = self.read_message(message).await {
+        if let Some(message) = self.read_message(message).await {
             match message {
                 ClientToClientMessage::EncryptionKeyPart(key_part) => {
                     if key_part.len() != KEY_SIZE {
@@ -248,7 +252,7 @@ impl ConferenceManager {
     }
 
     async fn process_message_normal_operation(&mut self, message: Vec<u8>) {
-        if let Ok(message) = self.read_message(message).await {
+        if let Some(message) = self.read_message(message).await {
             match message {
                 ClientToClientMessage::Message(message) => {
                     debug!("Received text message from peer for conference {}", self.conference_id);
@@ -274,7 +278,8 @@ impl ConferenceManager {
             },
             ClientToClientMessage::Message(_) => {
                 if let Some(ephemeral_encryption_key) = self.ephemeral_encryption_key {
-                    let encrypted_message = crypto::encrypt_message(&message.encode(), &ephemeral_encryption_key).unwrap();
+                    let signed_message = self.sing_message(message.encode()).await;
+                    let encrypted_message = crypto::encrypt_message(&signed_message, &ephemeral_encryption_key).unwrap();
                     self.message_sender.send(
                         Message{conference: self.conference_id, message: encrypted_message.encode()}
                     ).await.expect("Could not send message");
@@ -286,8 +291,44 @@ impl ConferenceManager {
         true
     }
 
-    async fn read_message(&mut self, message: Vec<u8>) -> std::result::Result<ClientToClientMessage, String> {
+    async fn sing_message(&mut self, message: Vec<u8>) -> Vec<u8> {
         todo!();
+    }
+
+    async fn check_message_signature(&mut self, message: Vec<u8>) -> bool {
+        todo!();
+    }
+
+    async fn read_message(&mut self, message: Vec<u8>) -> Option<ClientToClientMessage> {
+        assert!(!message.is_empty());
+        match message[0] {
+            0x01 => {
+                // PublicKey
+                Some(ClientToClientMessage::PublicKey(message[1..].to_vec()))
+            },
+            0x02 => {
+                // EncryptionKeyPart
+                Some(ClientToClientMessage::EncryptionKeyPart(message[1..].to_vec()))
+            },
+            0x03 => {
+                // Message
+                if message.len() < 5 {
+                    warn!("Received text message with invalid length from peer for conference {} (not enought bytes to read message length)", self.conference_id);
+                    return None;
+                }
+                let message_length = u32::from_be_bytes(message[1..5].try_into().unwrap());
+                if message.len() != 5 + message_length as usize {
+                    warn!("Received text message with invalid length from peer for conference {} (message length is incorrect)", self.conference_id);
+                    return None;
+                }
+                Some(ClientToClientMessage::Message(message[5..].to_vec()))
+            },
+            _ => {
+                warn!("Received message with invalid message type 0x{} from peer for conference {}", message[0], self.conference_id);
+                None
+            }
+
+        }
     }
 
     async fn process_text_message(&mut self, message: Vec<u8>) {
