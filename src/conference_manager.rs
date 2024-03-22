@@ -248,7 +248,19 @@ impl ConferenceManager {
     }
 
     async fn process_message_normal_operation(&mut self, message: Vec<u8>) {
-        todo!();
+        if let Ok(message) = self.read_message(message).await {
+            match message {
+                ClientToClientMessage::Message(message) => {
+                    debug!("Received text message from peer for conference {}", self.conference_id);
+                    self.process_text_message(message).await;
+                },
+                _ => {
+                    warn!("Received unexpected message from peer for conference {}", self.conference_id);
+                },
+            }
+        } else {
+            warn!("Received invalid message from peer for conference {}", self.conference_id);
+        }
     }
 
     /// Send a message to the conference, returns `true` if the message was sent successfully
