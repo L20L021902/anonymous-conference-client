@@ -1,4 +1,7 @@
+use curve25519_dalek::{Scalar, RistrettoPoint};
+pub use nazgul::blsag::BLSAG_COMPACT;
 use openssl::symm::{encrypt_aead, Cipher, decrypt_aead};
+use rand_core::OsRng;
 
 const CIPHER: fn() -> Cipher = Cipher::chacha20_poly1305;
 pub const KEY_SIZE: usize = 32; // chacha20 uses a 32-byte key
@@ -67,8 +70,19 @@ pub fn apply_ephemeral_key_part(key: &mut [u8; KEY_SIZE], part: &[u8]) {
     key.iter_mut().zip(part.iter()).for_each(|(a, b)| *a ^= *b);
 }
 
+/// Signs a message using the BLSAG signature scheme
+pub fn sign_message(private_key: &Scalar, personal_key_insertion_index: usize, ring: &[RistrettoPoint], message: &[u8]) -> BLSAG_COMPACT {
+    BLSAG_COMPACT::sign::<sha3::Keccak512, OsRng>(private_key, ring, personal_key_insertion_index, message)
+}
+
+/// Verifies a BLSAG signature
+pub fn verify_message(signature: &BLSAG_COMPACT, ring: &[RistrettoPoint], message: &[u8]) -> bool {
+    BLSAG_COMPACT::verify::<sha3::Keccak512>(signature, ring, message)
+}
+
 #[cfg(test)]
 mod tests {
+    use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
     use super::*;
 
     #[test]
@@ -81,5 +95,18 @@ mod tests {
 
         result.tag[0] ^= 0x01; // flip a bit in the tag
         assert!(decrypt_message(&result.ciphertext, &key, &result.iv, &result.tag).is_err());
+    }
+
+    #[test]
+    fn test_sign_message() {
+        let message = "hi".as_bytes().to_vec();
+        let mut ring: Vec<RistrettoPoint> = (0..5)
+            .map(|_| RistrettoPoint::random(&mut OsRng))
+            .collect();
+        let key: Scalar = Scalar::random(&mut OsRng);
+        let pubkey = key * RISTRETTO_BASEPOINT_POINT;
+        ring.push(pubkey);
+        let signature = sign_message(&key, ring.len()-1, &ring, &message);
+        assert!(verify_message(&signature, &ring, &message));
     }
 }

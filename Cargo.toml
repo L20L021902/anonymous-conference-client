@@ -8,10 +8,14 @@ edition = "2021"
 [dependencies]
 argon2 = "0.5.3"
 async-native-tls = "0.5.0"
+curve25519-dalek = {path="../../curve25519-dalek/curve25519-dalek", version="4.1.2"}
 env_logger = "0.11.3"
 futures = "0.3.30"
 log = "0.4.21"
+nazgul = {path="../../nazgul", version="1.0.0"}
 openssl = "0.10.64"
+rand_core = "0.6.4"
+sha3 = "0.10.8"
 
 [dependencies.async-std]
 version = "1.12"
