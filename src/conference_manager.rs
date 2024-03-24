@@ -9,11 +9,11 @@ use crate::{constants::{
     ConferenceId,
     NumberOfPeers,
     EncryptionKey,
-    Message,
+    Message, ConferenceEvent,
 }, crypto::KEY_SIZE};
 
 use curve25519_dalek::{Scalar, RistrettoPoint, ristretto::CompressedRistretto, constants::RISTRETTO_BASEPOINT_POINT};
-use futures::prelude::*;
+use futures::{prelude::*, SinkExt};
 
 use log::{debug, warn, info};
 use crate::crypto;
@@ -68,7 +68,7 @@ pub struct ConferenceManager {
     conference_id: ConferenceId,
     number_of_peers: NumberOfPeers,
     initial_encryption_key: EncryptionKey,
-    conference_event_receiver: Receiver<ServerEvent>,
+    conference_event_receiver: Receiver<ConferenceEvent>,
     message_sender: Sender<Message>,
     ui_event_sender: Sender<UIEvent>,
     _unsorted_public_keys: HashSet<CompressedRistretto>,
@@ -87,7 +87,7 @@ impl ConferenceManager {
         conference_id: ConferenceId,
         number_of_peers: NumberOfPeers,
         initial_encryption_key: EncryptionKey,
-        conference_event_receiver: Receiver<ServerEvent>,
+        conference_event_receiver: Receiver<ConferenceEvent>,
         message_sender: Sender<Message>,
         ui_event_sender: Sender<UIEvent>,
     ) -> ConferenceManager {
@@ -127,9 +127,9 @@ impl ConferenceManager {
 
         while let Some(server_event) = self.conference_event_receiver.next().await {
             match server_event {
-                ServerEvent::ConferenceRestructuring((_, number_of_peers)) => self.initiate_conference_restructuring(number_of_peers).await,
-                ServerEvent::IncomingMessage((_, message)) => self.process_incoming_message(message).await,
-                _ => panic!("ConferenceManager received unexpected event")
+                ConferenceEvent::ConferenceRestructuring(number_of_peers) => self.initiate_conference_restructuring(number_of_peers).await,
+                ConferenceEvent::IncomingMessage(message) => self.process_incoming_message(message).await,
+                ConferenceEvent::OutboundMessage((message_id, message)) => self.send_message(ClientToClientMessage::Message(message), Some(message_id)).await,
             }
         }
 
@@ -152,12 +152,13 @@ impl ConferenceManager {
     async fn start_public_key_exchange(&mut self) {
         debug!("Starting initial public key exchange for conference {}", self.conference_id);
         self.state = ConferenceState::PublicKeyExchange;
-        self.send_message(ClientToClientMessage::PublicKey(*self.personal_public_key.compress().as_bytes())).await;
+        self.send_message(ClientToClientMessage::PublicKey(*self.personal_public_key.compress().as_bytes()), None).await;
     }
 
     async fn start_ephemeral_key_negotiation(&mut self) {
         debug!("Starting ephemeral encryption key negotiation for conference {}", self.conference_id);
         self.state = ConferenceState::EncryptionKeyNegotiation;
+        self.send_message(ClientToClientMessage::EncryptionKeyPart(self.new_ephemeral_key.to_vec()), None).await;
     }
 
     async fn process_incoming_message(&mut self, message: Vec<u8>) {
@@ -251,6 +252,7 @@ impl ConferenceManager {
     async fn finish_conference_setup(&mut self) {
         debug!("Conference {} setup finished", self.conference_id);
         self.state = ConferenceState::NormalOperation;
+        self.ui_event_sender.send(UIEvent::ConferenceRestructuringFinished(self.conference_id)).await.unwrap();
     }
 
     async fn process_message_normal_operation(&mut self, message: Vec<u8>) {
@@ -269,8 +271,8 @@ impl ConferenceManager {
         }
     }
 
-    /// Send a message to the conference, returns `true` if the message was sent successfully
-    async fn send_message(&mut self, message: ClientToClientMessage) -> bool {
+    /// Send a message to the conference // TODO report errors to ui
+    async fn send_message(&mut self, message: ClientToClientMessage, message_id: Option<usize>) {
         match message {
             ClientToClientMessage::PublicKey(_) | ClientToClientMessage::EncryptionKeyPart(_) => {
                 let encrypted_message = crypto::encrypt_message(&message.encode(), &self.initial_encryption_key).unwrap();
@@ -282,19 +284,24 @@ impl ConferenceManager {
                 if let Some(ephemeral_encryption_key) = self.ephemeral_encryption_key {
                     if self.ring.is_none() || self.ring_personal_key_index.is_none() {
                         warn!("Tried to send message for conference {} while not fully set up", self.conference_id);
-                        return false;
+                        self.ui_event_sender.send(UIEvent::MessageError((self.conference_id, message_id.unwrap()))).await.unwrap();
+                        return;
+                    }
+                    if message_id.is_none() {
+                        warn!("Tried to send message for conference {} without message id", self.conference_id);
+                        self.ui_event_sender.send(UIEvent::MessageError((self.conference_id, message_id.unwrap()))).await.unwrap();
+                        return;
                     }
                     let signed_message = self.sign_message(message.encode()).await;
                     let encrypted_message = crypto::encrypt_message(&signed_message, &ephemeral_encryption_key).unwrap();
                     self.message_sender.send(
                         Message{conference: self.conference_id, message: encrypted_message.encode()}
-                    ).await.expect("Could not send message");
+                    ).await.unwrap();
                 } else {
-                    return false;
+                    return;
                 }
             },
         }
-        true
     }
 
     /// Sign a message with the ring signature
@@ -399,7 +406,7 @@ impl ConferenceManager {
             return;
         };
         info!("Received message from peer for conference {}", self.conference_id);
-        // TODO notify the UI
+        self.ui_event_sender.send(UIEvent::IncomingMessage((self.conference_id, message, is_signature_valid))).await.unwrap();
     }
 }
 

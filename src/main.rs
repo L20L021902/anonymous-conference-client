@@ -7,6 +7,7 @@ mod crypto;
 mod protocol;
 mod connection_manager;
 mod conference_manager;
+mod state_manager;
 
 #[async_std::main]
 async fn main() -> Result<()> {

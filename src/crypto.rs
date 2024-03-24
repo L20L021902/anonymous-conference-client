@@ -1,18 +1,22 @@
+use argon2::{password_hash::Salt, Argon2, PasswordHasher};
 use curve25519_dalek::{Scalar, RistrettoPoint};
 pub use nazgul::blsag::BLSAG_COMPACT;
 use openssl::symm::{encrypt_aead, Cipher, decrypt_aead};
 use rand_core::OsRng;
 
+use crate::constants::PacketNonce;
+
 const CIPHER: fn() -> Cipher = Cipher::chacha20_poly1305;
 pub const KEY_SIZE: usize = 32; // chacha20 uses a 32-byte key
+pub const SALT_SIZE: usize = 32; // argon2 uses a 32-byte salt
 const IV_SIZE: usize = 12; // chacha20 uses a 12-byte nonce
 const TAG_SIZE: usize = 16; // chacha20-poly1305 uses a 16-byte tag
 
 /// The result of an encryption operation.
 pub struct EncryptionResult {
     pub ciphertext: Vec<u8>,
-    pub iv: Vec<u8>,
-    pub tag: Vec<u8>,
+    pub iv: [u8; IV_SIZE],
+    pub tag: [u8; TAG_SIZE],
 }
 
 impl EncryptionResult {
@@ -28,30 +32,35 @@ impl EncryptionResult {
         if data.len() < IV_SIZE + TAG_SIZE {
             return Err(());
         }
-        let iv = data[0..IV_SIZE].to_vec();
-        let tag = data[IV_SIZE..IV_SIZE + TAG_SIZE].to_vec();
+        let mut iv = [0u8; IV_SIZE];
+        iv.clone_from_slice(&data[0..IV_SIZE]);
+        let mut tag = [0u8; TAG_SIZE];
+        tag.clone_from_slice(&data[IV_SIZE..IV_SIZE + TAG_SIZE]);
         let ciphertext = data[IV_SIZE + TAG_SIZE..].to_vec();
         Ok(EncryptionResult{ ciphertext, iv, tag })
     }
+}
+
+/// Generate iv
+pub fn generate_iv() -> [u8; IV_SIZE] {
+    let mut out = [0u8; IV_SIZE];
+    openssl::rand::rand_bytes(&mut out).unwrap();
+    out
 }
 
 /// Encrypts a message using the chacha20-poly1305 AEAD cipher.
 /// Returns the ciphertext, the IV, and the tag.
 pub fn encrypt_message(message: &[u8], key: &[u8]) -> Result<EncryptionResult, ()> {
     assert_eq!(key.len(), KEY_SIZE);
-    let mut iv: [u8; IV_SIZE] = [0; IV_SIZE];
-    openssl::rand::rand_bytes(&mut iv).unwrap();
+    let iv = generate_iv();
     let mut tag: [u8; TAG_SIZE] = [0; TAG_SIZE];
     match encrypt_aead(CIPHER(), key, Some(&iv), &[], message, &mut tag) {
-        Ok(ciphertext) => Ok(EncryptionResult{ ciphertext, iv: iv.to_vec(), tag: tag.to_vec() }),
+        Ok(ciphertext) => Ok(EncryptionResult{ ciphertext, iv, tag }),
         Err(_) => Err(()),
     }
 }
 
-pub fn decrypt_message(ciphertext: &[u8], key: &[u8], iv: &[u8], tag: &[u8]) -> Result<Vec<u8>, ()> {
-    assert_eq!(key.len(), KEY_SIZE);
-    assert_eq!(iv.len(), IV_SIZE);
-    assert_eq!(tag.len(), TAG_SIZE);
+pub fn decrypt_message(ciphertext: &[u8], key: &[u8; KEY_SIZE], iv: &[u8; IV_SIZE], tag: &[u8; TAG_SIZE]) -> Result<Vec<u8>, ()> {
     match decrypt_aead(CIPHER(), key, Some(iv), &[], ciphertext, tag) {
         Ok(plaintext) => Ok(plaintext),
         Err(_) => Err(()),
@@ -78,6 +87,30 @@ pub fn sign_message(private_key: &Scalar, personal_key_insertion_index: usize, r
 /// Verifies a BLSAG signature
 pub fn verify_message(signature: &BLSAG_COMPACT, ring: &[RistrettoPoint], message: &[u8]) -> bool {
     BLSAG_COMPACT::verify::<sha3::Keccak512>(signature, ring, message)
+}
+
+/// Generate salt
+pub fn generate_salt() -> [u8; SALT_SIZE] {
+    let mut out = [0u8; SALT_SIZE];
+    openssl::rand::rand_bytes(&mut out).unwrap();
+    out
+}
+
+/// Hashes a password using Argon2, returns the hash and the salt
+pub fn hash_password(password: &[u8]) -> ([u8; 32], [u8; SALT_SIZE]) {
+    let salt = generate_salt();
+    let argon = Argon2::default();
+    let mut out = [0u8; 32];
+    argon.hash_password_into(password, &salt, &mut out).unwrap();
+    (out, salt)
+}
+
+/// Hashes a password using Argon2 with a given salt
+pub fn hash_password_with_salt(password: &[u8], salt: &[u8; SALT_SIZE]) -> [u8; 32] {
+    let argon = Argon2::default();
+    let mut out = [0u8; 32];
+    argon.hash_password_into(password, salt, &mut out).unwrap();
+    out
 }
 
 #[cfg(test)]
@@ -108,5 +141,13 @@ mod tests {
         ring.push(pubkey);
         let signature = sign_message(&key, ring.len()-1, &ring, &message);
         assert!(verify_message(&signature, &ring, &message));
+    }
+
+    #[test]
+    fn test_hash_password() {
+        let password = "password".as_bytes();
+        let (hash, salt) = hash_password(password);
+        assert_eq!(hash, hash_password_with_salt(password, &salt));
+        assert_ne!(hash, hash_password_with_salt(b"password1", &salt));
     }
 }

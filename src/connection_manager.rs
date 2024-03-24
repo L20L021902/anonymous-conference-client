@@ -8,7 +8,7 @@ use async_std::{
 use futures::{select, FutureExt, SinkExt, AsyncReadExt, AsyncWriteExt};
 use crate::constants::{Result, Sender, Receiver, ServerEvent, ClientEvent, SERVER_NAME, PROTOCOL_HEADER, ServerToClientMessageTypePrimitive, ConferenceJoinSalt, ConferenceEncryptionSalt};
 
-async fn start_connection_manager(
+pub async fn start_connection_manager(
     server_address: impl ToSocketAddrs,
     mut server_event_sender: Sender<ServerEvent>,
     mut client_event_receiver: Receiver<ClientEvent>

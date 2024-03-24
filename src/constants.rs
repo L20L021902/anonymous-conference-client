@@ -15,12 +15,14 @@ pub type ConferenceJoinSalt = [u8; 32];
 pub type ConferenceEncryptionSalt = [u8; 32];
 
 
+#[derive(Clone)]
 pub struct Message {
     pub conference: ConferenceId,
     pub message: Vec<u8>,
 }
 
 #[repr(u8)]
+#[derive(Clone)]
 pub enum ClientEvent {
     CreateConference((PacketNonce, PasswordHash, ConferenceJoinSalt, ConferenceEncryptionSalt)) = 0x01,
     GetConferenceJoinSalt((PacketNonce, ConferenceId)) = 0x02,
@@ -53,6 +55,12 @@ pub enum ServerEvent {
     ConferenceJoinError((PacketNonce, ConferenceId)) = 0x13,
     ConferenceLeaveError((PacketNonce, ConferenceId)) = 0x14,
     MessageError((PacketNonce, ConferenceId)) = 0x15,
+}
+
+pub enum ConferenceEvent {
+    ConferenceRestructuring(NumberOfPeers),
+    IncomingMessage(Vec<u8>),
+    OutboundMessage((MessageID, Vec<u8>)),
 }
 
 #[repr(u8)]
@@ -99,8 +107,33 @@ impl TryFrom<u8> for ServerToClientMessageTypePrimitive {
     }
 }
 
-pub enum UIEvent {
+pub type MessageID = usize;
 
+pub enum UIAction {
+    /// Create a new conference with the given password.
+    CreateConference(String),
+    /// Join a conference with the given ID and password.
+    JoinConference((ConferenceId, String)),
+    /// Leave a conference with the given ID.
+    LeaveConference(ConferenceId),
+    /// Send a message to a conference.
+    SendMessage((ConferenceId, MessageID, String)),
+    /// Disconnect from the server.
+    Disconnect,
+}
+
+pub enum UIEvent {
+    ConferenceCreated(ConferenceId),
+    ConferenceCreateFailed,
+    ConferenceJoined((ConferenceId, NumberOfPeers)),
+    ConferenceJoinFailed(ConferenceId),
+    ConferenceLeft(ConferenceId),
+    IncomingMessage((ConferenceId, Vec<u8>, bool)),
+    MessageAccepted((ConferenceId, MessageID)),
+    MessageRejected((ConferenceId, MessageID)),
+    MessageError((ConferenceId, MessageID)),
+    ConferenceRestructuring((ConferenceId, NumberOfPeers)),
+    ConferenceRestructuringFinished(ConferenceId),
 }
 
 pub const SERVER_NAME: &str = "anonymous-conference.program";
