@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_std::{prelude::*, task};
-use futures::{channel::mpsc, select, FutureExt, SinkExt, AsyncReadExt, AsyncWriteExt};
+use futures::{channel::mpsc, select, FutureExt, SinkExt};
 use log::{error, info, warn};
 use crate::{
     connection_manager,
@@ -18,11 +18,11 @@ enum SentEvent {
     GetConferenceJoinSalt((ConferenceId, String)),
     JoinConference((ConferenceId, String)),
     LeaveConference(ConferenceId),
-    SendMessage((ConferenceId, MessageID)),
+    SendMessage((ConferenceId, Option<MessageID>)),
     Disconnect,
 }
 
-async fn start_state_manager(server_address: String, mut ui_event_sender: Sender<UIEvent>, mut ui_action_receiver: Receiver<UIAction>) {
+pub async fn start_state_manager(server_address: String, mut ui_event_sender: Sender<UIEvent>, mut ui_action_receiver: Receiver<UIAction>) {
     let (server_event_sender, mut server_event_receiver) = mpsc::unbounded();
     let (mut client_event_sender, client_event_receiver) = mpsc::unbounded();
     let (message_sender, mut message_receiver) = mpsc::unbounded::<Message>();
@@ -124,7 +124,10 @@ async fn start_state_manager(server_address: String, mut ui_event_sender: Sender
                                         warn!("Received unexpected conference id {} from SendMessage event, instead got {}", conference_id, expected_conference_id);
                                         continue;
                                     }
-                                    ui_event_sender.send(UIEvent::MessageAccepted((conference_id, *message_id))).await.unwrap();
+                                    if let Some(message_id) = message_id {
+                                        // only notify ui when a text message is accepted
+                                        ui_event_sender.send(UIEvent::MessageAccepted((conference_id, *message_id))).await.unwrap();
+                                    }
                                     sent_packets.remove(&packet_nonce);
                                 } else {
                                     warn!("Received unexpected packet with nonce {} from SendMessage event, instead got {:?}", packet_nonce, sent_event);
@@ -223,7 +226,10 @@ async fn start_state_manager(server_address: String, mut ui_event_sender: Sender
                                         continue;
                                     }
                                     warn!("Received a MessageError event for conference {}", conference_id);
-                                    ui_event_sender.send(UIEvent::MessageRejected((conference_id, *message_id))).await.unwrap();
+                                    if let Some(message_id) = message_id {
+                                        // only notify ui when a text message is rejected
+                                        ui_event_sender.send(UIEvent::MessageRejected((conference_id, *message_id))).await.unwrap();
+                                    }
                                     sent_packets.remove(&packet_nonce);
                                 } else {
                                     warn!("Received unexpected packet with nonce {} from MessageError event, instead got {:?}", packet_nonce, sent_event);
@@ -234,18 +240,20 @@ async fn start_state_manager(server_address: String, mut ui_event_sender: Sender
                         },
                     }
                 },
-                None => break,
+                None => continue,
             },
             message = message_receiver.next().fuse() => match message {
-                // handle messages from 
+                // handle messages
                 Some(message) => {
                     send_packets_last_index += 1;
                     let packet_nonce = send_packets_last_index;
+                    let message_id = message.message_id;
+                    let conference_id = message.conference;
                     let packet = ClientEvent::SendMessage((packet_nonce, message));
-                    sent_packets.insert(packet_nonce, SentEvent::CreateConference);
+                    sent_packets.insert(packet_nonce, SentEvent::SendMessage((conference_id, message_id)));
                     client_event_sender.send(packet).await.unwrap();
                 },
-                None => break,
+                None => continue,
             },
             ui_event = ui_action_receiver.next().fuse() => match ui_event {
                 // handle UI events
@@ -300,7 +308,10 @@ async fn start_state_manager(server_address: String, mut ui_event_sender: Sender
                         },
                     }
                 },
-                None => break,
+                None => continue,
+            },
+            complete => {
+                warn!("complete")
             },
         }
     }
@@ -330,7 +341,7 @@ async fn create_conference(
     );
     task::spawn(async move {
         if let Ok(()) = manager.start_conference_manager().await {
-            warn!("Conference manager for conference {} exited successfully", conference_id);
+            info!("Conference manager for conference {} exited successfully", conference_id);
         } else {
             warn!("Conference manager for conference {} exited with an error", conference_id);
         }
