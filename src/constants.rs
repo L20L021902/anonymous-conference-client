@@ -19,6 +19,7 @@ pub type ConferenceEncryptionSalt = [u8; 32];
 pub struct Message {
     pub conference: ConferenceId,
     pub message: Vec<u8>,
+    pub message_id: Option<MessageID>,
 }
 
 #[repr(u8)]

@@ -4,7 +4,6 @@ use crate::{constants::{
     Receiver,
     Sender,
     Result,
-    ServerEvent,
     UIEvent,
     ConferenceId,
     NumberOfPeers,
@@ -12,8 +11,10 @@ use crate::{constants::{
     Message, ConferenceEvent,
 }, crypto::KEY_SIZE};
 
+use async_std::stream::StreamExt;
+use async_std::io::{Cursor, ReadExt};
 use curve25519_dalek::{Scalar, RistrettoPoint, ristretto::CompressedRistretto, constants::RISTRETTO_BASEPOINT_POINT};
-use futures::{prelude::*, SinkExt};
+use futures::SinkExt;
 
 use log::{debug, warn, info};
 use crate::crypto;
@@ -56,7 +57,7 @@ impl ClientToClientMessage {
             ClientToClientMessage::Message(message) => {
                 let mut result = Vec::new();
                 result.push(0x03);
-                result.extend_from_slice(&message.len().to_be_bytes());
+                result.extend_from_slice(&u32::try_from(message.len()).unwrap().to_be_bytes());
                 result.extend_from_slice(message);
                 result
             },
@@ -129,7 +130,7 @@ impl ConferenceManager {
             match server_event {
                 ConferenceEvent::ConferenceRestructuring(number_of_peers) => self.initiate_conference_restructuring(number_of_peers).await,
                 ConferenceEvent::IncomingMessage(message) => self.process_incoming_message(message).await,
-                ConferenceEvent::OutboundMessage((message_id, message)) => self.send_message(ClientToClientMessage::Message(message), Some(message_id)).await,
+                ConferenceEvent::OutboundMessage((message_id, message)) => self.process_outbound_message(message_id, message).await,
             }
         }
 
@@ -162,7 +163,7 @@ impl ConferenceManager {
     }
 
     async fn process_incoming_message(&mut self, message: Vec<u8>) {
-        debug!("Received message for conference {}", self.conference_id);
+        debug!("Received message for conference {}, len is {}", self.conference_id, message.len());
         match self.state {
             ConferenceState::Initial => {
                 // ignore message
@@ -176,6 +177,18 @@ impl ConferenceManager {
                 warn!("Received message for conference {} in unexpected state, ignoring", self.conference_id);
             }
         }
+    }
+
+    async fn process_outbound_message(&mut self, message_id: usize, message: Vec<u8>) {
+        if self.ring.is_none() || self.ring_personal_key_index.is_none() || self.ephemeral_encryption_key.is_none() {
+            warn!("Tried to send message for conference {} while not fully set up", self.conference_id);
+            self.ui_event_sender.send(UIEvent::MessageError((self.conference_id, message_id))).await.unwrap();
+            return;
+        }
+        // sign message
+        let signed_message = self.sign_message(message).await;
+        // send message
+        self.send_message(ClientToClientMessage::Message(signed_message), Some(message_id)).await;
     }
 
     async fn process_message_public_key_exchange(&mut self, message: Vec<u8>) {
@@ -277,29 +290,16 @@ impl ConferenceManager {
             ClientToClientMessage::PublicKey(_) | ClientToClientMessage::EncryptionKeyPart(_) => {
                 let encrypted_message = crypto::encrypt_message(&message.encode(), &self.initial_encryption_key).unwrap();
                 self.message_sender.send(
-                    Message{conference: self.conference_id, message: encrypted_message.encode()}
+                    Message{conference: self.conference_id, message: encrypted_message.encode(), message_id: None}
                 ).await.expect("Could not send message");
             },
             ClientToClientMessage::Message(_) => {
-                if let Some(ephemeral_encryption_key) = self.ephemeral_encryption_key {
-                    if self.ring.is_none() || self.ring_personal_key_index.is_none() {
-                        warn!("Tried to send message for conference {} while not fully set up", self.conference_id);
-                        self.ui_event_sender.send(UIEvent::MessageError((self.conference_id, message_id.unwrap()))).await.unwrap();
-                        return;
-                    }
-                    if message_id.is_none() {
-                        warn!("Tried to send message for conference {} without message id", self.conference_id);
-                        self.ui_event_sender.send(UIEvent::MessageError((self.conference_id, message_id.unwrap()))).await.unwrap();
-                        return;
-                    }
-                    let signed_message = self.sign_message(message.encode()).await;
-                    let encrypted_message = crypto::encrypt_message(&signed_message, &ephemeral_encryption_key).unwrap();
-                    self.message_sender.send(
-                        Message{conference: self.conference_id, message: encrypted_message.encode()}
-                    ).await.unwrap();
-                } else {
-                    return;
-                }
+                assert!(self.ephemeral_encryption_key.is_some());
+                assert!(message_id.is_some());
+                let encrypted_message = crypto::encrypt_message(&message.encode(), &self.ephemeral_encryption_key.unwrap()).unwrap();
+                self.message_sender.send(
+                    Message{conference: self.conference_id, message: encrypted_message.encode(), message_id}
+                ).await.unwrap();
             },
         }
     }
@@ -328,43 +328,122 @@ impl ConferenceManager {
             return None;
         }
 
+        const SCALAR_BYTE_SIZE: usize = 32;
+        let mut message_reader = Cursor::new(message);
+        let mut buffer = [0; SCALAR_BYTE_SIZE];
+
         // parse signature
-        let challenge = Scalar::from_canonical_bytes(message[0..32].try_into().unwrap());
-        if challenge.is_none().into() {
-            warn!("Received signed message with invalid signature from peer for conference {} (could not parse challenge)", self.conference_id);
+        if message_reader.read_exact(&mut buffer).await.is_err() {
+            warn!("Received signed message with invalid signature from peer for conference {} (could not read challenge)", self.conference_id);
             return None;
         }
-        let challenge = challenge.unwrap();
+        let Some(challenge) = Scalar::from_canonical_bytes(buffer).into()
+        else {
+            warn!("Received signed message with invalid signature from peer for conference {} (could not parse challenge)", self.conference_id);
+            return None;
+        };
+
         let mut responses = Vec::with_capacity(self.number_of_peers as usize);
-        for response in message[32..32 + 32 * self.number_of_peers as usize].chunks_exact(32) {
-            let response = Scalar::from_canonical_bytes(response.try_into().unwrap());
-            if response.is_none().into() {
+        for _ in 0..self.number_of_peers {
+            if message_reader.read_exact(&mut buffer).await.is_err() {
+                warn!("Received signed message with invalid signature from peer for conference {} (could not read response)", self.conference_id);
+                return None;
+            }
+            if let Some(response) = Scalar::from_canonical_bytes(buffer).into() {
+                responses.push(response);
+            } else {
                 warn!("Received signed message with invalid signature from peer for conference {} (could not parse response)", self.conference_id);
                 return None;
             }
-            responses.push(response.unwrap());
         }
-        let key_image = CompressedRistretto::from_slice(&message[32 + 32 * self.number_of_peers as usize..32 + 32 * self.number_of_peers as usize + 32]);
-        if key_image.is_ok() {
-            warn!("Received signed message with invalid signature from peer for conference {} (could not parse key image)", self.conference_id);
+
+        if message_reader.read_exact(&mut buffer).await.is_err() {
+            warn!("Received signed message with invalid signature from peer for conference {} (could not read key image)", self.conference_id);
             return None;
         }
-        let key_image = key_image.unwrap();
+        let Ok(key_image) = CompressedRistretto::from_slice(&buffer)
+        else {
+            warn!("Received signed message with invalid signature from peer for conference {} (could not parse key image)", self.conference_id);
+            return None;
+        };
+        let Some(key_image) = key_image.decompress()
+        else {
+            warn!("Received signed message with invalid signature from peer for conference {} (could not decompress key image)", self.conference_id);
+            return None;
+        };
 
         let signature = crypto::BLSAG_COMPACT {
             challenge,
             responses,
-            key_image: key_image.decompress().unwrap(),
+            key_image,
         };
 
-        let message = message[32 + 32 * self.number_of_peers as usize + 32..].to_vec();
+        let mut message = Vec::new();
+        if message_reader.read_to_end(&mut message).await.is_err() {
+            warn!("Received signed message with invalid signature from peer for conference {} (could not read message)", self.conference_id);
+            return None;
+        }
         let signature_valid = crypto::verify_message(&signature, self.ring.as_ref().unwrap(), &message);
 
         Some((message, signature_valid))
     }
 
+    async fn decrypt_message_helper(&self, message: Vec<u8>) -> Option<Vec<u8>> {
+        if let Ok(encrypted_message) = crypto::EncryptionResult::decode(&message) {
+            if let Some(ephemeral_encryption_key) = self.ephemeral_encryption_key {
+                // could either be encrypted using the ephemeral key or the initial key
+                match self.state {
+                    ConferenceState::NormalOperation => {
+                        // first try ephemeral_encryption_key, then initial_encryption_key
+                        if let Ok(decrypted_message) = crypto::decrypt_message(&ephemeral_encryption_key, &encrypted_message) {
+                            debug!("Decrypted message using ephemeral_encryption_key in conference {}", self.conference_id);
+                            return Some(decrypted_message);
+                        } else if let Ok(decrypted_message) = crypto::decrypt_message(&self.initial_encryption_key, &encrypted_message) {
+                            debug!("Decrypted message using initial_encryption_key in conference {}", self.conference_id);
+                            return Some(decrypted_message);
+                        } else {
+                            warn!("Received invalid message from peer for conference {} (could not decrypt message)", self.conference_id);
+                            return None;
+                        }
+                    },
+                    _ => {
+                        // first try initial_encryption_key, then ephemeral_encryption_key (probably old)
+                        if let Ok(decrypted_message) = crypto::decrypt_message(&self.initial_encryption_key, &encrypted_message) {
+                            debug!("Decrypted message using initial_encryption_key in conference {}", self.conference_id);
+                            return Some(decrypted_message);
+                        } else if let Ok(decrypted_message) = crypto::decrypt_message(&ephemeral_encryption_key, &encrypted_message) {
+                            debug!("Decrypted message using ephemeral_encryption_key in conference {}", self.conference_id);
+                            return Some(decrypted_message);
+                        } else {
+                            warn!("Received invalid message from peer for conference {} (could not decrypt message)", self.conference_id);
+                            return None;
+                        }
+                    },
+                }
+            } else {
+                // only initial_encryption_key is available
+                if let Ok(decrypted_message) = crypto::decrypt_message(&self.initial_encryption_key, &encrypted_message) {
+                    debug!("Decrypted message from peer for conference {} using initial_encryption_key", self.conference_id);
+                    return Some(decrypted_message);
+                } else {
+                    warn!("Received invalid message from peer for conference {} (could not decrypt message)", self.conference_id);
+                    return None;
+                }
+            }
+        } else {
+            warn!("Received invalid message from peer for conference {} (could not decode encrypted message)", self.conference_id);
+            return None;
+        }
+    }
+
     async fn read_message(&mut self, message: Vec<u8>) -> Option<ClientToClientMessage> {
         assert!(!message.is_empty());
+        let Some(message) = self.decrypt_message_helper(message).await
+        else {
+            warn!("Received invalid message from peer for conference {}", self.conference_id);
+            return None;
+        };
+
         match message[0] {
             0x01 => {
                 // PublicKey
@@ -392,7 +471,7 @@ impl ConferenceManager {
                 Some(ClientToClientMessage::Message(message[5..].to_vec()))
             },
             _ => {
-                warn!("Received message with invalid message type 0x{} from peer for conference {}", message[0], self.conference_id);
+                warn!("Received message with invalid message type {} from peer for conference {}", message[0], self.conference_id);
                 None
             }
 
