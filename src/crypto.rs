@@ -60,8 +60,8 @@ pub fn encrypt_message(message: &[u8], key: &[u8]) -> Result<EncryptionResult, (
     }
 }
 
-pub fn decrypt_message(ciphertext: &[u8], key: &[u8; KEY_SIZE], iv: &[u8; IV_SIZE], tag: &[u8; TAG_SIZE]) -> Result<Vec<u8>, ()> {
-    match decrypt_aead(CIPHER(), key, Some(iv), &[], ciphertext, tag) {
+pub fn decrypt_message(key: &[u8; KEY_SIZE], encrypted_data: &EncryptionResult) -> Result<Vec<u8>, ()> {
+    match decrypt_aead(CIPHER(), key, Some(&encrypted_data.iv), &[], &encrypted_data.ciphertext, &encrypted_data.tag) {
         Ok(plaintext) => Ok(plaintext),
         Err(_) => Err(()),
     }
