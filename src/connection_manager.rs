@@ -1,11 +1,10 @@
 use log::{debug, warn};
 use async_native_tls::{TlsConnector, Certificate};
 use async_std::{
-    io::{BufReader, BufWriter},
+    io::{BufReader, BufRead, BufWriter},
     net::{TcpStream, ToSocketAddrs},
-    prelude::*,
 };
-use futures::{select, FutureExt, SinkExt, AsyncReadExt, AsyncWriteExt};
+use futures::{select, AsyncReadExt, AsyncWriteExt, FutureExt, sink::SinkExt, StreamExt};
 use crate::constants::{Result, Sender, Receiver, ServerEvent, ClientEvent, SERVER_NAME, PROTOCOL_HEADER, ServerToClientMessageTypePrimitive, ConferenceJoinSalt, ConferenceEncryptionSalt};
 
 pub async fn start_connection_manager(
@@ -66,7 +65,7 @@ async fn handle_handshake(reader: &mut (impl AsyncReadExt + Unpin), writer: &mut
     Ok(())
 }
 
-async fn read_server_event(event_type: u8, reader: &mut (impl AsyncReadExt + Unpin)) -> Result<ServerEvent> {
+async fn read_server_event(event_type: u8, reader: &mut (impl BufRead + Unpin)) -> Result<ServerEvent> {
     if let Ok(server_event_type) = ServerToClientMessageTypePrimitive::try_from(event_type) {
         match server_event_type {
             ServerToClientMessageTypePrimitive::HandshakeAcknowledged => {
@@ -126,7 +125,7 @@ async fn read_server_event(event_type: u8, reader: &mut (impl AsyncReadExt + Unp
                 reader.read_exact(&mut buffer).await?;
                 let message_length = u32::from_be_bytes(buffer);
                 let mut message = Vec::with_capacity(message_length as usize);
-                reader.read_exact(&mut message).await?;
+                reader.take(message_length.into()).read_to_end(&mut message).await?;
                 Ok(ServerEvent::IncomingMessage((conference_id, message)))
             },
             ServerToClientMessageTypePrimitive::ConferenceRestructuring => {
@@ -210,7 +209,7 @@ async fn write_client_event(event: ClientEvent, writer: &mut (impl AsyncWriteExt
         ClientEvent::SendMessage((nonce, message)) => {
             writer.write_all(&nonce.to_be_bytes()).await?;
             writer.write_all(&message.conference.to_be_bytes()).await?;
-            writer.write_all(&message.message.len().to_be_bytes()).await?;
+            writer.write_all(&u32::try_from(message.message.len()).unwrap().to_be_bytes()).await?;
             writer.write_all(&message.message).await?;
         },
         ClientEvent::Disconnect => {
