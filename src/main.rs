@@ -1,16 +1,13 @@
-use async_std::task;
-use constants::Result;
-use protocol::enter_main_loop;
-
 mod constants;
 mod crypto;
-mod protocol;
 mod connection_manager;
 mod conference_manager;
 mod state_manager;
+mod cli_ui;
 
 #[async_std::main]
-async fn main() -> Result<()> {
+async fn main() {
     env_logger::init();
-    task::block_on(enter_main_loop("localhost:7667"))
+    let mut ui = cli_ui::CLII_UI::new("localhost:7667".to_string());
+    ui.start_ui().await;
 }
