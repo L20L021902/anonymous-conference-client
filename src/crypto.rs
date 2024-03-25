@@ -1,12 +1,13 @@
-use argon2::{password_hash::Salt, Argon2, PasswordHasher};
+use argon2::Argon2;
 use curve25519_dalek::{Scalar, RistrettoPoint};
 pub use nazgul::blsag::BLSAG_COMPACT;
-use openssl::symm::{encrypt_aead, Cipher, decrypt_aead};
-use rand_core::OsRng;
+use rand_core::{OsRng, RngCore};
 
-use crate::constants::PacketNonce;
+use chacha20poly1305::{
+    aead::{Aead, KeyInit}, AeadCore, ChaCha20Poly1305, Key, Nonce
+};
 
-const CIPHER: fn() -> Cipher = Cipher::chacha20_poly1305;
+const CIPHER: fn(&Key) -> ChaCha20Poly1305 = ChaCha20Poly1305::new;
 pub const KEY_SIZE: usize = 32; // chacha20 uses a 32-byte key
 pub const SALT_SIZE: usize = 32; // argon2 uses a 32-byte salt
 const IV_SIZE: usize = 12; // chacha20 uses a 12-byte nonce
@@ -16,14 +17,12 @@ const TAG_SIZE: usize = 16; // chacha20-poly1305 uses a 16-byte tag
 pub struct EncryptionResult {
     pub ciphertext: Vec<u8>,
     pub iv: [u8; IV_SIZE],
-    pub tag: [u8; TAG_SIZE],
 }
 
 impl EncryptionResult {
     pub fn encode(&self) -> Vec<u8> {
         let mut result = Vec::new();
         result.extend_from_slice(&self.iv);
-        result.extend_from_slice(&self.tag);
         result.extend_from_slice(&self.ciphertext);
         result
     }
@@ -34,18 +33,14 @@ impl EncryptionResult {
         }
         let mut iv = [0u8; IV_SIZE];
         iv.clone_from_slice(&data[0..IV_SIZE]);
-        let mut tag = [0u8; TAG_SIZE];
-        tag.clone_from_slice(&data[IV_SIZE..IV_SIZE + TAG_SIZE]);
-        let ciphertext = data[IV_SIZE + TAG_SIZE..].to_vec();
-        Ok(EncryptionResult{ ciphertext, iv, tag })
+        let ciphertext = data[IV_SIZE..].to_vec();
+        Ok(EncryptionResult{ ciphertext, iv})
     }
 }
 
 /// Generate iv
 pub fn generate_iv() -> [u8; IV_SIZE] {
-    let mut out = [0u8; IV_SIZE];
-    openssl::rand::rand_bytes(&mut out).unwrap();
-    out
+    ChaCha20Poly1305::generate_nonce(&mut OsRng).to_vec().try_into().unwrap()
 }
 
 /// Encrypts a message using the chacha20-poly1305 AEAD cipher.
@@ -53,24 +48,27 @@ pub fn generate_iv() -> [u8; IV_SIZE] {
 pub fn encrypt_message(message: &[u8], key: &[u8]) -> Result<EncryptionResult, ()> {
     assert_eq!(key.len(), KEY_SIZE);
     let iv = generate_iv();
-    let mut tag: [u8; TAG_SIZE] = [0; TAG_SIZE];
-    match encrypt_aead(CIPHER(), key, Some(&iv), &[], message, &mut tag) {
-        Ok(ciphertext) => Ok(EncryptionResult{ ciphertext, iv, tag }),
-        Err(_) => Err(()),
+    match CIPHER(Key::from_slice(key)).encrypt(Nonce::from_slice(&iv), message) {
+        Ok(ciphertext) => {
+            Ok(EncryptionResult{ciphertext, iv})
+        },
+        Err(_) => {
+            Err(())
+        },
     }
 }
 
 pub fn decrypt_message(key: &[u8; KEY_SIZE], encrypted_data: &EncryptionResult) -> Result<Vec<u8>, ()> {
-    match decrypt_aead(CIPHER(), key, Some(&encrypted_data.iv), &[], &encrypted_data.ciphertext, &encrypted_data.tag) {
+    match CIPHER(Key::from_slice(key)).decrypt(Nonce::from_slice(&encrypted_data.iv), encrypted_data.ciphertext.as_ref()) {
         Ok(plaintext) => Ok(plaintext),
         Err(_) => Err(()),
     }
 }
 
 pub fn generate_ephemeral_key() -> [u8; KEY_SIZE] {
-    let mut key: [u8; KEY_SIZE] = [0; KEY_SIZE];
-    openssl::rand::rand_bytes(&mut key).unwrap();
-    key
+    let mut out = [0u8; KEY_SIZE];
+    OsRng.fill_bytes(&mut out);
+    out
 }
 
 pub fn apply_ephemeral_key_part(key: &mut [u8; KEY_SIZE], part: &[u8]) {
@@ -92,7 +90,7 @@ pub fn verify_message(signature: &BLSAG_COMPACT, ring: &[RistrettoPoint], messag
 /// Generate salt
 pub fn generate_salt() -> [u8; SALT_SIZE] {
     let mut out = [0u8; SALT_SIZE];
-    openssl::rand::rand_bytes(&mut out).unwrap();
+    OsRng.fill_bytes(&mut out);
     out
 }
 
@@ -120,14 +118,14 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt() {
-        let key: [u8; 32] = [0; 32];
+        let key = generate_ephemeral_key();
         let message = b"Hello, world!";
         let mut result = encrypt_message(message, &key).unwrap();
-        let plaintext = decrypt_message(&result.ciphertext, &key, &result.iv, &result.tag).unwrap();
+        let plaintext = decrypt_message(&key, &result).unwrap();
         assert_eq!(&message.to_vec(), &plaintext);
 
-        result.tag[0] ^= 0x01; // flip a bit in the tag
-        assert!(decrypt_message(&result.ciphertext, &key, &result.iv, &result.tag).is_err());
+        result.ciphertext[0] ^= 0x01; // flip a bit in the tag
+        assert!(decrypt_message(&key, &result).is_err());
     }
 
     #[test]
