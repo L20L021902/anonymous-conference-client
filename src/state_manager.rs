@@ -22,13 +22,21 @@ enum SentEvent {
     Disconnect,
 }
 
+enum Void {}
+
 pub async fn start_state_manager(server_address: String, mut ui_event_sender: Sender<UIEvent>, mut ui_action_receiver: Receiver<UIAction>) {
     let (server_event_sender, mut server_event_receiver) = mpsc::unbounded();
     let (mut client_event_sender, client_event_receiver) = mpsc::unbounded();
     let (message_sender, mut message_receiver) = mpsc::unbounded::<Message>();
+    let (disconnect_sender, mut disconnect_receiver) = mpsc::unbounded::<Void>();
 
     // start connection_manager
-    task::spawn(async move {connection_manager::start_connection_manager(server_address, server_event_sender, client_event_receiver).await});
+    task::spawn(async move {
+        if let Err(e) = connection_manager::start_connection_manager(server_address, server_event_sender, client_event_receiver).await {
+            error!("Error in connection manager: {:?}", e);
+            drop(disconnect_sender);
+        }
+    });
 
     let mut conferences: HashMap<ConferenceId, Sender<ConferenceEvent>> = HashMap::new();
     let mut send_packets_last_index: PacketNonce = 0;
@@ -309,6 +317,10 @@ pub async fn start_state_manager(server_address: String, mut ui_event_sender: Se
                     }
                 },
                 None => continue,
+            },
+            disconnect = disconnect_receiver.next().fuse() => match disconnect {
+                Some(disconnect) => match disconnect {}, // compile time unreachable!
+                None => break,
             },
             complete => {
                 warn!("complete")
