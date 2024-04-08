@@ -284,7 +284,7 @@ impl ConferenceManager {
         }
     }
 
-    /// Send a message to the conference // TODO report errors to ui
+    /// Send a message to the conference
     async fn send_message(&mut self, message: ClientToClientMessage, message_id: Option<usize>) {
         match message {
             ClientToClientMessage::PublicKey(_) | ClientToClientMessage::EncryptionKeyPart(_) => {
