@@ -4,10 +4,12 @@ mod connection_manager;
 mod conference_manager;
 mod state_manager;
 mod cli_ui;
+mod gtk_ui;
 
 #[async_std::main]
 async fn main() {
     env_logger::init();
-    let mut ui = cli_ui::CLII_UI::new("localhost:7667".to_string());
-    ui.start_ui().await;
+    // let mut ui = cli_ui::CLII_UI::new("localhost:7667".to_string());
+    // ui.start_ui().await;
+    gtk_ui::start_gtk_ui("localhost:7667".to_string());
 }
