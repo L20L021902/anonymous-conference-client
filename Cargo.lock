@@ -54,6 +54,7 @@ dependencies = [
  "relm4",
  "relm4-components",
  "sha3",
+ "tracker",
 ]
 
 [[package]]

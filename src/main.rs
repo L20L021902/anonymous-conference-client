@@ -11,5 +11,5 @@ async fn main() {
     env_logger::init();
     // let mut ui = cli_ui::CLII_UI::new("localhost:7667".to_string());
     // ui.start_ui().await;
-    gtk_ui::start_gtk_ui("localhost:7667".to_string());
+    gtk_ui::main_window::start_gtk_ui("localhost:7667".to_string());
 }

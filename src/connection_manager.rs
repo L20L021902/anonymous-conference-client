@@ -243,5 +243,28 @@ mod tests {
         task::block_on(start_connection_manager(server_address, server_event_sender, client_event_receiver))?;
         Ok(())
     }
+
+    #[test]
+    fn test_read_server_event_conference_created() {
+        let event_type = ServerToClientMessageTypePrimitive::ConferenceCreated as u8;
+        let mut reader = BufReader::new(&b"\x00\x00\x00\x01\x00\x00\x00\x02"[..]);
+        let event = task::block_on(read_server_event(event_type, &mut reader)).unwrap();
+        match event {
+            ServerEvent::ConferenceCreated((nonce, conference_id)) => {
+                assert_eq!(nonce, 1);
+                assert_eq!(conference_id, 2);
+            },
+            _ => panic!("Unexpected event type"),
+        }
+    }
+
+    #[test]
+    fn test_read_server_event_conference_created_failed() {
+        let event_type = ServerToClientMessageTypePrimitive::ConferenceCreated as u8;
+        let mut reader = BufReader::new(&b"\x00\x00\x00\x01"[..]);
+        let event = task::block_on(read_server_event(event_type, &mut reader));
+        assert!(event.is_err());
+    }
+
 }
 
