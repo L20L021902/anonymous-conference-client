@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use async_std::task::{self, JoinHandle};
 use futures::{channel::mpsc, SinkExt, StreamExt};
-use gtk::prelude::*;
+use gtk::{glib::property::PropertyGet, prelude::*};
 use log::debug;
 use relm4::*;
 use crate::{
@@ -9,7 +11,7 @@ use crate::{
     },
     state_manager,
     gtk_ui::{
-        stack::StackWidgets,
+        stack::{StackAction, StackWidgets},
         conference_created_dialog::ConferenceCreatedDialog,
         constants::GUIAction,
     }
@@ -18,11 +20,10 @@ use crate::{
 const APP_ID: &str = "com.anonymous-conference.app";
 const MAIN_WINDOW_TITLE_TEXT: &str = "Anonymous Conference Client";
 
-#[derive(PartialEq)]
-struct Conference {
-    conference_id: ConferenceId,
-    number_of_peers: NumberOfPeers,
-}
+const CONFERENCE_CREATED_DIALOG_TITLE_SUCCESS: &str = "Conference Created";
+const CONFERENCE_CREATED_DIALOG_TITLE_ERROR: &str = "Error Creating Conference";
+const CONFERENCE_CREATED_DIALOG_TEXT_SUCCESS: &str = "Conference created successfully!\nConference ID is:";
+const CONFERENCE_CREATED_DIALOG_TEXT_ERROR: &str = "Error creating conference.\nPlease try again.";
 
 #[tracker::track]
 struct AppModel {
@@ -37,11 +38,13 @@ struct AppModel {
     #[do_not_track]
     stack: Controller<StackWidgets>,
     statusbar_string: String,
-    conferences: Vec<Conference>,
+    #[do_not_track]
+    last_created_conference_password: Option<String>,
 }
 
 #[relm4::component]
-impl SimpleComponent for AppModel {
+impl Component for AppModel {
+    type CommandOutput = ();
     /// The type of the messages that this component can receive.
     type Input = GUIAction;
     /// The type of the messages that this component can send.
@@ -113,6 +116,7 @@ impl SimpleComponent for AppModel {
             ui_event_handler_handle,
             stack,
             statusbar_string: "Loading...".to_string(),
+            last_created_conference_password: None,
             tracker: 0
         };
 
@@ -121,14 +125,28 @@ impl SimpleComponent for AppModel {
         relm4::ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Self::Input, _sender: relm4::ComponentSender<Self>) {
+    fn update(&mut self, message: Self::Input, sender: relm4::ComponentSender<Self>, root: &Self::Root) {
         match message {
             GUIAction::Create(password) => {
                 debug!("Create conference with password: \"{}\"", password);
+                if self.last_created_conference_password.is_some() {
+                    self.set_statusbar_string("Already creating another conference, please wait...".to_string());
+                    return;
+                }
+                self.last_created_conference_password = Some(password.clone());
                 let mut sender_clone = self.ui_action_sender.clone();
                 task::spawn(async move {
                     sender_clone.send(UIAction::CreateConference(password)).await.unwrap();
                 });
+            }
+            GUIAction::ConferenceCreated(conference_id) => {
+                debug!("Conference created with id: \"{}\"", conference_id);
+                show_conference_created_success_dialog(conference_id,
+                    self.last_created_conference_password.as_ref().unwrap().clone(),
+                    sender.clone(),
+                    root
+                );
+                self.last_created_conference_password = None;
             }
             GUIAction::Join((conference_id, password)) => {
                 debug!("Join conference with id: \"{}\" and password: \"{}\"", conference_id, password);
@@ -140,7 +158,7 @@ impl SimpleComponent for AppModel {
             GUIAction::ConferenceJoined((conference_id, number_of_peers)) => {
                 println!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers);
                 self.set_statusbar_string(format!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers));
-                self.stack.input(UIAction::ConferenceJoined((conference_id, number_of_peers)));
+                self.stack.sender().send(StackAction::NewConference((conference_id, number_of_peers))).unwrap();
             }
             GUIAction::Disconnected => {
                 println!("Disconnected from server");
@@ -169,6 +187,36 @@ async fn translate_ui_events(mut ui_event_receiver: Receiver<UIEvent>, sender: r
             UIEvent::ConferenceRestructuringFinished(conference_id) => sender.input(GUIAction::ConferenceRestructuringFinished(conference_id)),
         }
     }
+}
+
+#[allow(deprecated)]
+fn show_conference_created_success_dialog(conference_id: ConferenceId, conference_password: String, sender: relm4::ComponentSender<AppModel>, root: &gtk::Window) {
+    let dialog = gtk::MessageDialog::builder()
+        .modal(true)
+        .transient_for(root)
+        .title(CONFERENCE_CREATED_DIALOG_TITLE_SUCCESS)
+        .text(format!("{}\n{}", CONFERENCE_CREATED_DIALOG_TEXT_SUCCESS, conference_id))
+        .build();
+    let dialog_text_label = dialog.message_area().first_child().unwrap();
+    let dialog_text = dialog_text_label.downcast_ref::<gtk::Label>().unwrap();
+    dialog_text.set_selectable(true);
+    dialog_text.set_halign(gtk::Align::Center); // TODO: not working
+    dialog.add_button("Close", gtk::ResponseType::Close);
+    dialog.add_button("Join Conference", gtk::ResponseType::Apply);
+    let sender_clone = sender.clone();
+    dialog.connect_response(move |dialog, response_id| {
+        match response_id {
+            gtk::ResponseType::Close => {
+                dialog.close();
+            }
+            gtk::ResponseType::Apply => {
+                sender_clone.input(GUIAction::Join((conference_id, conference_password.clone())));
+                dialog.close();
+            }
+            _ => {}
+        }
+    });
+    dialog.show();
 }
 
 pub fn start_gtk_ui(server_address: String) {
