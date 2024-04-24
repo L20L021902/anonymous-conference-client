@@ -8,7 +8,8 @@ use crate::{
 pub enum GUIAction {
     Create(String),
     Join((ConferenceId, String)),
-    Leave,
+    Leave(ConferenceId),
+    SendMessage((ConferenceId, MessageID, String)),
     Disconnected,
 
     ConferenceCreated(ConferenceId),

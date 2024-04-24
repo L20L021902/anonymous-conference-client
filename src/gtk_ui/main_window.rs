@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use async_std::task::{self, JoinHandle};
 use futures::{channel::mpsc, SinkExt, StreamExt};
-use gtk::{glib::property::PropertyGet, prelude::*};
+use gtk::prelude::*;
 use log::debug;
 use relm4::*;
 use crate::{
@@ -12,7 +10,6 @@ use crate::{
     state_manager,
     gtk_ui::{
         stack::{StackAction, StackWidgets},
-        conference_created_dialog::ConferenceCreatedDialog,
         constants::GUIAction,
     }
 };
@@ -24,6 +21,9 @@ const CONFERENCE_CREATED_DIALOG_TITLE_SUCCESS: &str = "Conference Created";
 const CONFERENCE_CREATED_DIALOG_TITLE_ERROR: &str = "Error Creating Conference";
 const CONFERENCE_CREATED_DIALOG_TEXT_SUCCESS: &str = "Conference created successfully!\nConference ID is:";
 const CONFERENCE_CREATED_DIALOG_TEXT_ERROR: &str = "Error creating conference.\nPlease try again.";
+
+const CONFERENCE_JOIN_DIALOG_TITLE_ERROR: &str = "Conference Join Failed";
+const CONFERENCE_JOIN_DIALOG_TEXT_ERROR: &str = "Could not join conference, either the conference doesn't exist or the password was incorrect";
 
 #[tracker::track]
 struct AppModel {
@@ -148,6 +148,11 @@ impl Component for AppModel {
                 );
                 self.last_created_conference_password = None;
             }
+            GUIAction::ConferenceCreateFailed => {
+                debug!("Conference create failed");
+                show_simple_dialog(CONFERENCE_CREATED_DIALOG_TITLE_ERROR, CONFERENCE_CREATED_DIALOG_TEXT_ERROR, root);
+                self.last_created_conference_password = None;
+            }
             GUIAction::Join((conference_id, password)) => {
                 debug!("Join conference with id: \"{}\" and password: \"{}\"", conference_id, password);
                 let mut sender_clone = self.ui_action_sender.clone();
@@ -156,16 +161,60 @@ impl Component for AppModel {
                 });
             }
             GUIAction::ConferenceJoined((conference_id, number_of_peers)) => {
-                println!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers);
+                debug!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers);
                 self.set_statusbar_string(format!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers));
                 self.stack.sender().send(StackAction::NewConference((conference_id, number_of_peers))).unwrap();
+            }
+            GUIAction::ConferenceJoinFailed(conference_id) => {
+                debug!("Join conference failed, conference ID: {}", conference_id);
+                show_simple_dialog(CONFERENCE_JOIN_DIALOG_TEXT_ERROR, CONFERENCE_JOIN_DIALOG_TEXT_ERROR, root);
+            }
+            GUIAction::SendMessage((conference_id, message_id, message)) => {
+                debug!("Sending message in conference with ID: {}", conference_id);
+                let mut sender_clone = self.ui_action_sender.clone();
+                task::spawn(async move {
+                    sender_clone.send(UIAction::SendMessage((conference_id, message_id, message))).await.unwrap();
+                });
+            }
+            GUIAction::Leave(conference_id) => {
+                debug!("Leaving conference with ID {}", conference_id);
+                let mut sender_clone = self.ui_action_sender.clone();
+                task::spawn(async move {
+                    sender_clone.send(UIAction::LeaveConference(conference_id)).await.unwrap();
+                });
+            }
+            GUIAction::ConferenceLeft(conference_id) => {
+                debug!("Left conference with ID {}", conference_id);
+                self.stack.sender().send(StackAction::RemoveConference(conference_id)).unwrap();
+                self.set_statusbar_string(format!("Left conference with id: \"{}\"", conference_id));
+            }
+            GUIAction::IncomingMessage((conference_id, message, signature_valid)) => {
+                debug!("Incoming message in conference with ID: {}", conference_id);
+                self.stack.sender().send(StackAction::IncomingMessage((conference_id, message, signature_valid))).unwrap();
+            }
+            GUIAction::MessageAccepted((conference_id, message_id)) => {
+                debug!("Message accepted in conference with ID: {}", conference_id);
+                self.stack.sender().send(StackAction::MessageAccepted((conference_id, message_id))).unwrap();
+            }
+            GUIAction::MessageRejected((conference_id, message_id)) => {
+                debug!("Message rejected in conference with ID: {}", conference_id);
+                self.stack.sender().send(StackAction::MessageRejected((conference_id, message_id))).unwrap();
+            }
+            GUIAction::MessageError((conference_id, message_id)) => {
+                debug!("Message error in conference with ID: {}", conference_id);
+                self.stack.sender().send(StackAction::MessageError((conference_id, message_id))).unwrap();
+            }
+            GUIAction::ConferenceRestructuring((conference_id, number_of_peers)) => {
+                debug!("Conference restructuring in conference with ID: {}", conference_id);
+                self.stack.sender().send(StackAction::ConferenceRestructuring((conference_id, number_of_peers))).unwrap();
+            }
+            GUIAction::ConferenceRestructuringFinished(conference_id) => {
+                debug!("Conference restructuring finished in conference with ID: {}", conference_id);
+                self.stack.sender().send(StackAction::ConferenceRestructuringFinished(conference_id)).unwrap();
             }
             GUIAction::Disconnected => {
                 println!("Disconnected from server");
                 self.set_statusbar_string("Disconnected from server".to_string());
-            }
-            _ => {
-                println!("I dont now what to do with this signal... {:?}", message);
             }
         }
     }
@@ -219,9 +268,26 @@ fn show_conference_created_success_dialog(conference_id: ConferenceId, conferenc
     dialog.show();
 }
 
+#[allow(deprecated)]
+fn show_simple_dialog(title: &str, text: &str, root: &gtk::Window) {
+    let dialog = gtk::MessageDialog::builder()
+        .modal(true)
+        .transient_for(root)
+        .title(title)
+        .text(text)
+        .build();
+    dialog.add_button("Close", gtk::ResponseType::Close);
+    dialog.connect_response(move |dialog, response_id| {
+        if let gtk::ResponseType::Close = response_id {
+            dialog.close();
+        }
+    });
+    dialog.show();
+}
 pub fn start_gtk_ui(server_address: String) {
     // Create a new application
-    let app = relm4::RelmApp::new(APP_ID);
+    let random = rand::random::<u32>(); // allow multiple instances
+    let app = relm4::RelmApp::new(&format!("{}{}", APP_ID, random));
     app.run::<AppModel>(server_address);
 }
 
