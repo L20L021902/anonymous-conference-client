@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use log::debug;
-use relm4::factory::{FactoryHashMap, FactoryVecDeque};
+use relm4::factory::FactoryHashMap;
 use relm4::*;
 use crate::constants::{
     ConferenceId, NumberOfPeers, MessageID,
@@ -47,6 +47,7 @@ impl Component for StackWidgets {
         gtk::Box {
             set_orientation: gtk::Orientation::Vertical,
             set_spacing: 0,
+            set_halign: gtk::Align::Fill,
 
             #[name="stack_switcher"]
             gtk::StackSwitcher {
@@ -59,12 +60,13 @@ impl Component for StackWidgets {
                 set_transition_type: gtk::StackTransitionType::None,
                 set_vexpand: true,
                 set_hexpand: true,
-                set_valign: gtk::Align::Start,
+                set_valign: gtk::Align::Fill,
                 connect_visible_child_notify => StackAction::ChangedPage,
 
                 // Add conference page
                 add_titled[Some(ADD_CONFERENCE_PAGE), ADD_CONFERENCE_PAGE_TEXT] = &gtk::Box {
                     set_orientation: gtk::Orientation::Vertical,
+                    set_valign: gtk::Align::Center,
                     set_spacing: 60,
 
                     model.create_conference_frame.widget(),

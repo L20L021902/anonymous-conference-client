@@ -5,7 +5,7 @@ use log::debug;
 use relm4::*;
 use crate::{
     constants::{
-        Receiver, Sender, UIAction, UIEvent, ConferenceId, NumberOfPeers
+        Receiver, Sender, UIAction, UIEvent, ConferenceId,
     },
     state_manager,
     gtk_ui::{
@@ -25,20 +25,13 @@ const CONFERENCE_CREATED_DIALOG_TEXT_ERROR: &str = "Error creating conference.\n
 const CONFERENCE_JOIN_DIALOG_TITLE_ERROR: &str = "Conference Join Failed";
 const CONFERENCE_JOIN_DIALOG_TEXT_ERROR: &str = "Could not join conference, either the conference doesn't exist or the password was incorrect";
 
-#[tracker::track]
 struct AppModel {
-    #[do_not_track]
     server_address: String,
-    #[do_not_track]
     state_manager_handle: JoinHandle<()>,
-    #[do_not_track]
     ui_action_sender: Sender<UIAction>,
-    #[do_not_track]
     ui_event_handler_handle: JoinHandle<()>,
-    #[do_not_track]
     stack: Controller<StackWidgets>,
     statusbar_string: String,
-    #[do_not_track]
     last_created_conference_password: Option<String>,
 }
 
@@ -55,8 +48,8 @@ impl Component for AppModel {
     view!{
         #[root]
         gtk::Window {
-            set_default_width: 350,
-            set_default_height: 350,
+            set_default_width: 500,
+            set_default_height: 500,
             #[wrap(Some)]
             set_titlebar =  &gtk::HeaderBar {
                 set_show_title_buttons: true,
@@ -69,13 +62,14 @@ impl Component for AppModel {
             gtk::Box {
                 set_orientation: gtk::Orientation::Vertical,
                 set_spacing: 0,
+                set_valign: gtk::Align::Fill,
                     
                 append = model.stack.widget(),
                 #[name="statusbar"]
                 append = &gtk::Label {
                     set_halign: gtk::Align::Start,
-                    set_margin_all: 5,
-                    #[track = "model.changed(AppModel::statusbar_string())"]
+                    set_margin_all: 10,
+                    #[watch]
                     set_text: &model.statusbar_string,
                 }
             }
@@ -92,6 +86,15 @@ impl Component for AppModel {
         let (ui_action_sender, ui_action_receiver) = mpsc::unbounded();
 
         let stack = StackWidgets::builder().launch(()).forward(sender.input_sender(), |x| x);
+
+        let provider = gtk::CssProvider::new();
+        provider
+            .load_from_data("box#special-box { background-color: red; }");
+        gtk::style_context_add_provider_for_display(
+            &gtk::gdk::Display::default().expect("Failed to get default display"),
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
         
         // start state manager
         let server_address_clone = server_address.clone();
@@ -117,7 +120,6 @@ impl Component for AppModel {
             stack,
             statusbar_string: "Loading...".to_string(),
             last_created_conference_password: None,
-            tracker: 0
         };
 
         let widgets = view_output!();
@@ -130,7 +132,7 @@ impl Component for AppModel {
             GUIAction::Create(password) => {
                 debug!("Create conference with password: \"{}\"", password);
                 if self.last_created_conference_password.is_some() {
-                    self.set_statusbar_string("Already creating another conference, please wait...".to_string());
+                    self.statusbar_string = "Already creating another conference, please wait...".to_string();
                     return;
                 }
                 self.last_created_conference_password = Some(password.clone());
@@ -162,12 +164,12 @@ impl Component for AppModel {
             }
             GUIAction::ConferenceJoined((conference_id, number_of_peers)) => {
                 debug!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers);
-                self.set_statusbar_string(format!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers));
+                self.statusbar_string = format!("Joined conference with id: \"{}\" and number of peers: \"{}\"", conference_id, number_of_peers);
                 self.stack.sender().send(StackAction::NewConference((conference_id, number_of_peers))).unwrap();
             }
             GUIAction::ConferenceJoinFailed(conference_id) => {
                 debug!("Join conference failed, conference ID: {}", conference_id);
-                show_simple_dialog(CONFERENCE_JOIN_DIALOG_TEXT_ERROR, CONFERENCE_JOIN_DIALOG_TEXT_ERROR, root);
+                show_simple_dialog(CONFERENCE_JOIN_DIALOG_TITLE_ERROR, CONFERENCE_JOIN_DIALOG_TEXT_ERROR, root);
             }
             GUIAction::SendMessage((conference_id, message_id, message)) => {
                 debug!("Sending message in conference with ID: {}", conference_id);
@@ -186,7 +188,7 @@ impl Component for AppModel {
             GUIAction::ConferenceLeft(conference_id) => {
                 debug!("Left conference with ID {}", conference_id);
                 self.stack.sender().send(StackAction::RemoveConference(conference_id)).unwrap();
-                self.set_statusbar_string(format!("Left conference with id: \"{}\"", conference_id));
+                self.statusbar_string = format!("Left conference with id: \"{}\"", conference_id);
             }
             GUIAction::IncomingMessage((conference_id, message, signature_valid)) => {
                 debug!("Incoming message in conference with ID: {}", conference_id);
@@ -214,7 +216,7 @@ impl Component for AppModel {
             }
             GUIAction::Disconnected => {
                 println!("Disconnected from server");
-                self.set_statusbar_string("Disconnected from server".to_string());
+                self.statusbar_string = "Disconnected from server".to_string();
             }
         }
     }

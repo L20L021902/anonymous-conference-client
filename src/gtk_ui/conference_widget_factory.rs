@@ -51,7 +51,8 @@ impl FactoryComponent for Conference {
         #[root]
         root = gtk::Box {
             set_orientation: gtk::Orientation::Vertical,
-            set_halign: gtk::Align::Center,
+            set_halign: gtk::Align::Fill,
+            set_valign: gtk::Align::Fill,
             set_hexpand: true,
             set_spacing: 10,
             set_margin_all: 12,
@@ -76,11 +77,16 @@ impl FactoryComponent for Conference {
             gtk::Box {
                 set_orientation: gtk::Orientation::Horizontal,
                 set_spacing: 10,
+                set_halign: gtk::Align::Fill,
 
                 #[name(message_input)]
                 gtk::Entry {
                     set_placeholder_text: Some(MESSAGE_INPUT_PLACEHOLDER),
                     set_margin_all: 10,
+                    set_hexpand: true,
+                    connect_activate[send_message_button] => move |_entry| {
+                        send_message_button.emit_clicked()
+                    }
                 },
                 #[name(send_message_button)]
                 gtk::Button {

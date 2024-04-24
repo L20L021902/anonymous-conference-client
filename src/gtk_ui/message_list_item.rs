@@ -1,9 +1,8 @@
 use gtk::prelude::*;
 use relm4::{
-    binding::{Binding, U8Binding},
+    binding::U8Binding,
     prelude::*,
-    typed_view::list::{RelmListItem, TypedListView},
-    RelmObjectExt,
+    typed_view::list::RelmListItem,
     view,
 };
 
@@ -51,7 +50,6 @@ impl RelmListItem for MessageListItem {
                 set_orientation: gtk::Orientation::Horizontal,
                 set_spacing: 10,
                 set_margin_all: 10,
-                set_hexpand: true,
 
                 #[name(author)]
                 gtk::Label {
