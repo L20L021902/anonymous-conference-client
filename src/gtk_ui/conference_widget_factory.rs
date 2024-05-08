@@ -10,6 +10,7 @@ use super::message_list_item::{MessageListItem, MessageStatus};
 
 const MESSAGE_INPUT_PLACEHOLDER: &str = "Type your message here...";
 const MESSAGE_SEND_BUTTON_TEXT: &str = "Send Message";
+const CONFERENCE_LEAVE_BUTTON_TEXT: &str = "Leave Conference";
 
 pub struct Conference {
     conference_id: ConferenceId,
@@ -30,6 +31,7 @@ pub enum ConferenceInput {
     MessageError(MessageID),
     ConferenceRestructuring(NumberOfPeers),
     ConferenceRestructuringFinished,
+    LeaveConference,
 }
 
 #[derive(Debug)]
@@ -58,11 +60,22 @@ impl FactoryComponent for Conference {
             set_margin_all: 12,
 
             // CONFERENCE INFO
-            #[name(conference_id_label)]
-            gtk::Label {
-                set_use_markup: true,
-                #[watch]
-                set_label: &format!("Conference ID: <b>{}</b>, number of peers: <b>{}</b>", self.conference_id, self.number_of_peers),
+            gtk::Box {
+                set_orientation: gtk::Orientation::Horizontal,
+                set_spacing: 10,
+                set_halign: gtk::Align::Center,
+
+                gtk::Label {
+                    set_use_markup: true,
+                    #[watch]
+                    set_label: &format!("Conference ID: <b>{}</b>, number of peers: <b>{}</b>", self.conference_id, self.number_of_peers),
+                },
+                gtk::Button {
+                    set_label: CONFERENCE_LEAVE_BUTTON_TEXT,
+                    connect_clicked[sender] => move |_| {
+                        sender.input(ConferenceInput::LeaveConference);
+                    },
+                },
             },
 
             // MESSAGES
@@ -166,6 +179,9 @@ impl FactoryComponent for Conference {
             }
             ConferenceInput::ConferenceRestructuringFinished => {
                 self.can_send_messages = true;
+            }
+            ConferenceInput::LeaveConference => {
+                sender.output(ConferenceOutput::LeaveConference(self.conference_id)).unwrap();
             }
         }
     }
