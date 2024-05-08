@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 pub mod main_window;
 mod stack;
 mod create_conference_frame;
