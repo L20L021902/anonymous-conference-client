@@ -9,11 +9,11 @@ edition = "2021"
 argon2 = "0.5.3"
 async-native-tls = "0.5.0"
 chacha20poly1305 = "0.10.1"
-curve25519-dalek = {path="../../curve25519-dalek/curve25519-dalek", version="4.1.2"}
+curve25519-dalek = {git="https://github.com/L20L021902/curve25519-dalek"}
 env_logger = "0.11.3"
 futures = "0.3.30"
 log = "0.4.21"
-nazgul = {path="../../nazgul", version="1.0.0"}
+nazgul = {git="https://github.com/L20L021902/nazgul"}
 rand = "0.8.5"
 rand_core = "0.6.4"
 relm4 = "0.8.1"
