@@ -87,15 +87,6 @@ impl Component for AppModel {
 
         let stack = StackWidgets::builder().launch(()).forward(sender.input_sender(), |x| x);
 
-        let provider = gtk::CssProvider::new();
-        provider
-            .load_from_data("box#special-box { background-color: red; }");
-        gtk::style_context_add_provider_for_display(
-            &gtk::gdk::Display::default().expect("Failed to get default display"),
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-        
         // start state manager
         let server_address_clone = server_address.clone();
         let component_sender_clone = sender.clone();
