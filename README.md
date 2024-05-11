@@ -4,9 +4,13 @@
 
 ## 运行方式
 `RUST_LOG=debug cargo run`
+
 或
+
 `RUST_LOG=debug cargo run -- <可选的命令行参数>`
+
 或
+
 直接运行可执行文件(anonymous-conference-client.exe或anonymous-conference-client)
 
 >`RUST_LOG=debug`将日志级别设置为调试
