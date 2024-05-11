@@ -11,6 +11,8 @@ pub enum GUIAction {
     Leave(ConferenceId),
     SendMessage((ConferenceId, MessageID, String)),
     Disconnected,
+    Reconnect,
+    NotConnectedToServerError,
 
     ConferenceCreated(ConferenceId),
     ConferenceCreateFailed,

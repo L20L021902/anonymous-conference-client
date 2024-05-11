@@ -33,6 +33,7 @@ pub enum StackAction {
     MessageError((ConferenceId, MessageID)),
     ConferenceRestructuring((ConferenceId, NumberOfPeers)),
     ConferenceRestructuringFinished(ConferenceId),
+    ClearConferences,
 }
 
 #[relm4::component(pub)]
@@ -156,6 +157,10 @@ impl Component for StackWidgets {
                 if self.conferences.keys().any(|x| x == &conference_id_string) {
                     self.conferences.send(&conference_id_string, ConferenceInput::ConferenceRestructuringFinished);
                 }
+            }
+            StackAction::ClearConferences => {
+                debug!("Clearing all conferences");
+                self.conferences.clear();
             }
         }
     }
