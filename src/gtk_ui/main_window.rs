@@ -338,7 +338,8 @@ fn show_simple_dialog(title: &str, text: &str, root: &gtk::Window) {
 pub fn start_gtk_ui(server_address: String) {
     // Create a new application
     let random = rand::random::<u32>(); // allow multiple instances
-    let app = relm4::RelmApp::new(&format!("{}{}", APP_ID, random));
+    let app = relm4::RelmApp::new(&format!("{}{}", APP_ID, random))
+    .with_args(vec![]);
     app.run::<AppModel>(server_address);
 }
 
