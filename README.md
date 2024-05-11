@@ -1,6 +1,6 @@
 # 匿名会议系统客户端
 
-\>可执行文件可在发布页面获取<
+\>[可执行文件可在发布页面获取](https://github.com/L20L021902/anonymous-conference-client/releases/latest)<
 
 ## 运行方式
 `RUST_LOG=debug cargo run`
