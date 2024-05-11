@@ -3,15 +3,16 @@
 \>[可执行文件可在发布页面获取](https://github.com/L20L021902/anonymous-conference-client/releases/latest)<
 
 ## 运行方式
-`RUST_LOG=debug cargo run`
 
-或
+Windows:
 
-`RUST_LOG=debug cargo run -- <可选的命令行参数>`
+1. 打开命令提示符
+2. 执行`set RUST_LOG=debug`
+3. 执行`.\anonymous-conference-client.exe <可选的命令行参数>`
 
-或
+Linux:
 
-直接运行可执行文件(anonymous-conference-client.exe或anonymous-conference-client)
+1. `RUST_LOG=debug ./anonymous-conference-client <可选的命令行参数>`
 
 >`RUST_LOG=debug`将日志级别设置为调试
 
