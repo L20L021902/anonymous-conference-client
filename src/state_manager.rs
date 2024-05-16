@@ -279,22 +279,32 @@ pub async fn start_state_manager(server_address: String, mut ui_event_sender: Se
                             client_event_sender.send(packet).await.unwrap();
                         },
                         UIAction::JoinConference((conference_id, password)) => {
-                            send_packets_last_index += 1;
-                            let packet_nonce = send_packets_last_index;
-                            let packet = ClientEvent::GetConferenceJoinSalt((packet_nonce, conference_id));
+                            if !conferences.contains_key(&conference_id) {
+                                send_packets_last_index += 1;
+                                let packet_nonce = send_packets_last_index;
+                                let packet = ClientEvent::GetConferenceJoinSalt((packet_nonce, conference_id));
 
-                            sent_packets.insert(packet_nonce, SentEvent::GetConferenceJoinSalt((conference_id, password)));
+                                sent_packets.insert(packet_nonce, SentEvent::GetConferenceJoinSalt((conference_id, password)));
 
-                            client_event_sender.send(packet).await.unwrap();
+                                client_event_sender.send(packet).await.unwrap();
+                            } else {
+                                warn!("Attempted to join conference we are already a part of: {}", conference_id);
+                                ui_event_sender.send(UIEvent::ConferenceJoinFailed(conference_id)).await.unwrap();
+                            }
                         },
                         UIAction::LeaveConference(conference_id) => {
-                            send_packets_last_index += 1;
-                            let packet_nonce = send_packets_last_index;
-                            let packet = ClientEvent::LeaveConference((packet_nonce, conference_id));
+                            if conferences.contains_key(&conference_id) {
+                                send_packets_last_index += 1;
+                                let packet_nonce = send_packets_last_index;
+                                let packet = ClientEvent::LeaveConference((packet_nonce, conference_id));
 
-                            sent_packets.insert(packet_nonce, SentEvent::LeaveConference(conference_id));
+                                sent_packets.insert(packet_nonce, SentEvent::LeaveConference(conference_id));
 
-                            client_event_sender.send(packet).await.unwrap();
+                                client_event_sender.send(packet).await.unwrap();
+                            } else {
+                                warn!("Attempted to leave conference we are not a part of: {}", conference_id);
+                                ui_event_sender.send(UIEvent::ConferenceLeaveFailed(conference_id)).await.unwrap();
+                            }
                         },
                         UIAction::SendMessage((conference_id, message_id, message)) => {
                             if let Some(mut conference_sender) = conferences.get(&conference_id) {

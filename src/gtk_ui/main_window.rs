@@ -25,6 +25,9 @@ const CONFERENCE_CREATED_DIALOG_TEXT_ERROR: &str = "Error creating conference.\n
 const CONFERENCE_JOIN_DIALOG_TITLE_ERROR: &str = "Conference Join Failed";
 const CONFERENCE_JOIN_DIALOG_TEXT_ERROR: &str = "Could not join conference, either the conference doesn't exist or the password was incorrect";
 
+const CONFERENCE_LEAVE_DIALOG_TITLE_ERROR: &str = "Conference Leave Failed";
+const CONFERENCE_LEAVE_DIALOG_TEXT_ERROR: &str = "Could not leave conference";
+
 const NOT_CONNECTED_TO_SERVER_TITLE: &str = "Failed to connect to the server";
 const NOT_CONNECTED_TO_SERVER_TEXT: &str = "Could not connect to the server, make sure that the server is running";
 
@@ -207,6 +210,10 @@ impl Component for AppModel {
                     }
                 });
             }
+            GUIAction::ConferenceLeaveFailed(conference_id) => {
+                debug!("Leave conference failed, conference ID: {}", conference_id);
+                show_simple_dialog(CONFERENCE_LEAVE_DIALOG_TITLE_ERROR, CONFERENCE_LEAVE_DIALOG_TEXT_ERROR, root);
+            }
             GUIAction::ConferenceLeft(conference_id) => {
                 debug!("Left conference with ID {}", conference_id);
                 self.stack.sender().send(StackAction::RemoveConference(conference_id)).unwrap();
@@ -266,6 +273,7 @@ async fn translate_ui_events(mut ui_event_receiver: Receiver<UIEvent>, sender: r
             UIEvent::ConferenceJoined((conference_id, number_of_peers)) => sender.input(GUIAction::ConferenceJoined((conference_id, number_of_peers))),
             UIEvent::ConferenceJoinFailed(conference_id) => sender.input(GUIAction::ConferenceJoinFailed(conference_id)),
             UIEvent::ConferenceLeft(conference_id) => sender.input(GUIAction::ConferenceLeft(conference_id)),
+            UIEvent::ConferenceLeaveFailed(conference_id) => sender.input(GUIAction::ConferenceLeaveFailed(conference_id)),
             UIEvent::IncomingMessage((conference_id, message, is_private)) => sender.input(GUIAction::IncomingMessage((conference_id, message, is_private))),
             UIEvent::MessageAccepted((conference_id, message_id)) => sender.input(GUIAction::MessageAccepted((conference_id, message_id))),
             UIEvent::MessageRejected((conference_id, message_id)) => sender.input(GUIAction::MessageRejected((conference_id, message_id))),

@@ -154,6 +154,9 @@ impl CLII_UI {
                 self.conference_id = None;
                 self.can_send_messages = false;
             },
+            UIEvent::ConferenceLeaveFailed(conference_id) => {
+                self.print_system(format!("Failed to leave conference: {}", conference_id).as_str());
+            },
             UIEvent::IncomingMessage((_, message, is_signature_valid)) => {
                 let message = String::from_utf8_lossy(&message);
                 if is_signature_valid {
