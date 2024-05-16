@@ -180,15 +180,19 @@ impl ConferenceManager {
     }
 
     async fn process_outbound_message(&mut self, message_id: usize, message: Vec<u8>) {
-        if self.ring.is_none() || self.ring_personal_key_index.is_none() || self.ephemeral_encryption_key.is_none() {
-            warn!("Tried to send message for conference {} while not fully set up", self.conference_id);
-            self.ui_event_sender.send(UIEvent::MessageError((self.conference_id, message_id))).await.unwrap();
-            return;
+        match self.state {
+            ConferenceState::NormalOperation => {
+                assert!(self.ring.is_some() && self.ring_personal_key_index.is_some() && self.ephemeral_encryption_key.is_some());
+                // sign message
+                let signed_message = self.sign_message(message).await;
+                // send message
+                self.send_message(ClientToClientMessage::Message(signed_message), Some(message_id)).await;
+            }
+            _ => {
+                warn!("Tried to send message for conference {} while not fully set up", self.conference_id);
+                self.ui_event_sender.send(UIEvent::MessageError((self.conference_id, message_id))).await.unwrap();
+            }
         }
-        // sign message
-        let signed_message = self.sign_message(message).await;
-        // send message
-        self.send_message(ClientToClientMessage::Message(signed_message), Some(message_id)).await;
     }
 
     async fn process_message_public_key_exchange(&mut self, message: Vec<u8>) {
