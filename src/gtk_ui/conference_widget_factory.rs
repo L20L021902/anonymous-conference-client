@@ -97,6 +97,8 @@ impl FactoryComponent for Conference {
                     set_placeholder_text: Some(MESSAGE_INPUT_PLACEHOLDER),
                     set_margin_all: 10,
                     set_hexpand: true,
+                    #[watch]
+                    set_sensitive: self.can_send_messages,
                     connect_activate[send_message_button] => move |_entry| {
                         send_message_button.emit_clicked()
                     }
