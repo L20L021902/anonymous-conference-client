@@ -37,7 +37,7 @@ impl MessageListItem {
 pub struct MessageWidgets {
     author: gtk::Label,
     text: gtk::Label,
-    status: gtk::Label,
+    status: gtk::Image,
 }
 
 impl RelmListItem for MessageListItem {
@@ -50,23 +50,26 @@ impl RelmListItem for MessageListItem {
                 set_orientation: gtk::Orientation::Horizontal,
                 set_spacing: 10,
                 set_margin_all: 10,
+                add_css_class: "message-box",
+                
 
                 #[name(author)]
                 gtk::Label {
                     set_halign: gtk::Align::Start,
-                    set_valign: gtk::Align::Center,
+                    set_valign: gtk::Align::Start,
                 },
                 #[name(text)]
                 gtk::Label {
                     set_hexpand: true,
+                    set_wrap: true,
+                    set_wrap_mode: gtk::pango::WrapMode::WordChar,
                     set_halign: gtk::Align::Start,
                     set_valign: gtk::Align::Center,
                 },
                 #[name(status)]
-                gtk::Label {
-                    set_halign: gtk::Align::End,
-                    set_valign: gtk::Align::Center,
-                },
+                gtk::Image {
+                    set_valign: gtk::Align::End,
+                }
             }
 
         }
@@ -96,10 +99,10 @@ impl RelmListItem for MessageListItem {
         text.set_text(&self.text);
 
         match self.status {
-            MessageStatus::SignatureValid => status.set_text("VALID"),
-            MessageStatus::SignatureInvalid => status.set_text("INVALID"),
-            MessageStatus::MessageDelivered => status.set_text("DELIVERED"),
-            MessageStatus::MessageError => status.set_text("ERROR"),
+            MessageStatus::SignatureValid => status.set_from_icon_name(Some("security-high")),
+            MessageStatus::SignatureInvalid => status.set_from_icon_name(Some("security-low")),
+            MessageStatus::MessageDelivered => status.set_from_icon_name(Some("dialog-ok")),
+            MessageStatus::MessageError => status.set_from_icon_name(Some("dialog-error")),
         }
     }
 }

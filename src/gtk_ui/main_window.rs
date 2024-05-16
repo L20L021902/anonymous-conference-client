@@ -127,6 +127,23 @@ impl Component for AppModel {
             debug!("UI event handler exited");
         });
 
+        let custom_css = r#"
+            .message-box {
+                border: 1px solid #888888;
+                border-radius: 8px;
+                padding: 10px;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+                background-color: @theme_base_color;
+            }
+        "#;
+
+        // Create provider from custom_css
+        let provider = gtk::CssProvider::new();
+        provider.load_from_data(custom_css);
+
+        // Apply the CSS provider to the display
+        gtk::style_context_add_provider_for_display(&gtk::gdk::Display::default().unwrap(), &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+
         let model = AppModel {
             server_address,
             state_manager_handle,
