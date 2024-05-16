@@ -14,6 +14,7 @@ const IV_SIZE: usize = 12; // chacha20 uses a 12-byte nonce
 const TAG_SIZE: usize = 16; // chacha20-poly1305 uses a 16-byte tag
 
 /// The result of an encryption operation.
+#[derive(Debug, PartialEq)]
 pub struct EncryptionResult {
     pub ciphertext: Vec<u8>,
     pub iv: [u8; IV_SIZE],
@@ -129,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sign_message() {
+    fn test_sign_verify_message() {
         let message = "hi".as_bytes().to_vec();
         let mut ring: Vec<RistrettoPoint> = (0..5)
             .map(|_| RistrettoPoint::random(&mut OsRng))
@@ -147,5 +148,15 @@ mod tests {
         let (hash, salt) = hash_password(password);
         assert_eq!(hash, hash_password_with_salt(password, &salt));
         assert_ne!(hash, hash_password_with_salt(b"password1", &salt));
+    }
+
+    #[test]
+    fn test_encode_decode_encryption_result() {
+        let iv = generate_iv();
+        let ciphertext = b"this is a test ciphertext";
+        let expected_encryption_result = EncryptionResult {ciphertext: ciphertext.to_vec(), iv};
+        let encoded = expected_encryption_result.encode();
+        let decoded = EncryptionResult::decode(&encoded).unwrap();
+        assert_eq!(expected_encryption_result, decoded);
     }
 }
