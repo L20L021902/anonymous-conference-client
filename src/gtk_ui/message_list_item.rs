@@ -101,8 +101,8 @@ impl RelmListItem for MessageListItem {
         match self.status {
             MessageStatus::SignatureValid => status.set_from_icon_name(Some("security-high")),
             MessageStatus::SignatureInvalid => status.set_from_icon_name(Some("security-low")),
-            MessageStatus::MessageDelivered => status.set_from_icon_name(Some("dialog-ok")),
-            MessageStatus::MessageError => status.set_from_icon_name(Some("dialog-error")),
+            MessageStatus::MessageDelivered => status.set_from_icon_name(Some("emblem-ok")),
+            MessageStatus::MessageError => status.set_from_icon_name(Some("emblem-unreadable")),
         }
     }
 }

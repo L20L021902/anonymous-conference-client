@@ -24,6 +24,7 @@ impl SimpleComponent for JoinConferenceFrame {
             gtk::Box {
                 set_orientation: gtk::Orientation::Vertical,
                 set_spacing: 10,
+                set_margin_all: 10,
 
                 #[name="join_conference_button"]
                 append = &gtk::Button {
